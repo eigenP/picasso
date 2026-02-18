@@ -99,12 +99,49 @@ def compute_unmixing_matrix(
     step_mult=0.1,
     verbose=False,
     return_iters=False,
+    max_samples=100_000,
 ) -> npt.NDArray:
-    assert image.ndim == 3  # CYX
     n_channels = image.shape[0]
 
     image = img_as_float(image)
-    image_orig = image.copy()
+    image_flat = image.reshape(n_channels, -1)
+
+    if max_samples is not None and image_flat.shape[1] > max_samples:
+        n_pixels = image_flat.shape[1]
+
+        # If image is massive, we can't afford to compute norms on all pixels.
+        # Heuristic: if N > 10 * max_samples, sample a subset first
+        if n_pixels > 10 * max_samples:
+            subset_indices = np.random.randint(0, n_pixels, 10 * max_samples)
+            candidate_pixels = image_flat[:, subset_indices]
+        else:
+            candidate_pixels = image_flat
+
+        # Compute intensities (L2 norm)
+        intensities = np.linalg.norm(candidate_pixels, axis=0)
+
+        # Filter out very low intensity (background)
+        mask = intensities > 1e-6
+        if np.any(mask):
+            candidate_pixels = candidate_pixels[:, mask]
+            intensities = intensities[mask]
+
+        # Select max_samples randomly from valid pixels
+        if candidate_pixels.shape[1] > max_samples:
+            indices = np.random.choice(
+                candidate_pixels.shape[1], max_samples, replace=False
+            )
+            image_flat = candidate_pixels[:, indices]
+        else:
+            image_flat = candidate_pixels
+
+        if verbose:
+            print(
+                f"Subsampled to {image_flat.shape[1]} pixels.", file=sys.stdout
+            )
+
+    image_orig = image_flat.copy()
+    image = image_flat
 
     mat_cumul = np.eye(n_channels, dtype=float)
     mat_last = np.eye(n_channels, dtype=float)
@@ -114,7 +151,7 @@ def compute_unmixing_matrix(
         range(max_iters),
         disable=not verbose,
         desc="Unmixing iterations",
-        total=0,
+        total=max_iters,
         file=sys.stdout,
     ):
         mat = np.eye(n_channels, dtype=float)
@@ -151,11 +188,39 @@ def compute_unmixing_matrix(
 
         # update the next iteration of image
         assert mat_cumul.shape == (n_channels, n_channels)
-        assert image.ndim == 3
         # several times faster than np.einsum
         image = np.tensordot(mat_cumul, image_orig, axes=1)
+
+    if not mats:
+        mats.append(np.eye(n_channels, dtype=float))
 
     if return_iters:
         return np.stack(mats)
     else:
         return mats[-1]
+
+
+def apply_unmixing_matrix(
+    image: npt.NDArray, matrix: npt.NDArray
+) -> npt.NDArray:
+    """
+    Apply unmixing matrix to an image of arbitrary dimensions.
+
+    Parameters
+    ----------
+    image : ndarray
+        The input image of shape (C, ...).
+    matrix : ndarray
+        The unmixing matrix of shape (C, C).
+
+    Returns
+    -------
+    unmixed_image : ndarray
+        The unmixed image of shape (C, ...).
+    """
+    if matrix.shape[1] != image.shape[0]:
+        raise ValueError(
+            f"Matrix input channels ({matrix.shape[1]}) must match image "
+            f"channels ({image.shape[0]})"
+        )
+    return np.tensordot(matrix, image, axes=1)
