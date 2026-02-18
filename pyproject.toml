@@ -20,10 +20,10 @@ homepage = "https://jonaslab.bwh.harvard.edu"
 packages = [{ include = "picasso", from = "src" }]
 
 [tool.poetry.dependencies]
-python = ">=3.8,<3.12"
-fast-histogram = "^0.11"
-numpy = "^1.24"
-scipy = "^1.8"
+python = ">=3.8,<3.14"
+fast-histogram = ">=0.11"
+numpy = ">=1.24"
+scipy = ">=1.8"
 tqdm = "^4.65"
 
 [tool.poetry.group.dev.dependencies]
@@ -32,7 +32,7 @@ perfplot = "^0.10"
 pooch = "^1.7"
 pygifsicle = "^1.0"
 py-spy = "^0.3"
-scikit-image = "^0.20"
+scikit-image = ">=0.20"
 viztracer = "^0.15.6"
 joblib = "^1.2.0"
 
