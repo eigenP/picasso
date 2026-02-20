@@ -1,5 +1,6 @@
 import math
 import sys
+from typing import Union
 
 import numpy as np
 import numpy.typing as npt
@@ -7,6 +8,110 @@ from fast_histogram import histogram2d, histogram1d
 from scipy.optimize import fmin_cobyla
 from skimage.util import img_as_float
 from tqdm import tqdm
+
+
+def select_representative_pixels(
+    image: npt.NDArray,
+    quantile: float = 0.95,
+    max_samples: Union[float, int] = 100_000,
+    min_samples: int = 1_000,
+    verbose: bool = False,
+) -> npt.NDArray:
+    n_channels = image.shape[0]
+    n_pixels = image[0].size
+
+    # Flatten the image
+    image_flat = image.reshape(n_channels, -1)
+
+    # 1. Saturation Check
+    # Identify saturated pixels if the input is integer type
+    if np.issubdtype(image.dtype, np.integer):
+        max_val = np.iinfo(image.dtype).max
+        # Pixel is saturated if ANY channel is saturated
+        saturated_mask = np.any(image_flat == max_val, axis=0)
+    else:
+        saturated_mask = np.zeros(image_flat.shape[1], dtype=bool)
+
+    # Filter out saturated pixels
+    valid_indices = np.where(~saturated_mask)[0]
+
+    if len(valid_indices) == 0:
+        if verbose:
+            print("Warning: All pixels are saturated.", file=sys.stdout)
+        # Fallback: return everything converted to float
+        return img_as_float(image_flat)
+
+    # 2. Convert valid pixels to float
+    # We only convert the non-saturated pixels to save memory/time
+    valid_pixels_raw = image_flat[:, valid_indices]
+    valid_pixels = img_as_float(valid_pixels_raw)
+
+    # 3. Background Check
+    # Filter out very low intensity (background) pixels based on L2 norm
+    intensities = np.linalg.norm(valid_pixels, axis=0)
+    # Threshold 1e-6 is heuristic for "near zero"
+    background_mask = intensities < 1e-6
+
+    # Keep non-background pixels
+    keep_mask = ~background_mask
+    valid_pixels = valid_pixels[:, keep_mask]
+
+    if valid_pixels.shape[1] == 0:
+        if verbose:
+            print(
+                "Warning: All non-saturated pixels are background.",
+                file=sys.stdout,
+            )
+        # Fallback: return the saturated-filtered pixels (even if background)
+        # or just return empty? Returning empty breaks things downstream.
+        # Let's return the non-saturated set.
+        return img_as_float(valid_pixels_raw)
+
+    # 4. Top Percentile Selection
+    # Select pixels that are in the top percentile for *any* channel
+    n_valid = valid_pixels.shape[1]
+    selected_mask = np.zeros(n_valid, dtype=bool)
+
+    for c in range(n_channels):
+        channel_data = valid_pixels[c, :]
+        # Calculate threshold for this channel
+        threshold = np.percentile(channel_data, quantile * 100)
+        selected_mask |= channel_data >= threshold
+
+    high_signal_pixels = valid_pixels[:, selected_mask]
+    n_high_signal = high_signal_pixels.shape[1]
+
+    # 5. Subsampling
+    # Determine target sample count
+    if isinstance(max_samples, float):
+        # Interpret as a fraction of the ORIGINAL total pixels
+        # (or maybe valid pixels? User intent is likely "fraction of image")
+        target_samples = int(max_samples * n_pixels)
+    else:
+        target_samples = max_samples
+
+    # Ensure minimum samples
+    target_samples = max(target_samples, min_samples)
+
+    if n_high_signal > target_samples:
+        indices = np.random.choice(
+            n_high_signal, target_samples, replace=False
+        )
+        final_pixels = high_signal_pixels[:, indices]
+        if verbose:
+            print(
+                f"Subsampled {n_high_signal} high-signal pixels to {target_samples} pixels.",
+                file=sys.stdout,
+            )
+    else:
+        final_pixels = high_signal_pixels
+        if verbose:
+            print(
+                f"Using all {n_high_signal} high-signal pixels.",
+                file=sys.stdout,
+            )
+
+    return final_pixels
 
 
 def shannon_entropy(a: npt.NDArray) -> float:
@@ -99,46 +204,20 @@ def compute_unmixing_matrix(
     step_mult=0.1,
     verbose=False,
     return_iters=False,
-    max_samples=100_000,
+    max_samples: Union[float, int] = 100_000,
+    min_samples: int = 1_000,
+    quantile: float = 0.95,
 ) -> npt.NDArray:
     n_channels = image.shape[0]
 
-    image = img_as_float(image)
-    image_flat = image.reshape(n_channels, -1)
-
-    if max_samples is not None and image_flat.shape[1] > max_samples:
-        n_pixels = image_flat.shape[1]
-
-        # If image is massive, we can't afford to compute norms on all pixels.
-        # Heuristic: if N > 10 * max_samples, sample a subset first
-        if n_pixels > 10 * max_samples:
-            subset_indices = np.random.randint(0, n_pixels, 10 * max_samples)
-            candidate_pixels = image_flat[:, subset_indices]
-        else:
-            candidate_pixels = image_flat
-
-        # Compute intensities (L2 norm)
-        intensities = np.linalg.norm(candidate_pixels, axis=0)
-
-        # Filter out very low intensity (background)
-        mask = intensities > 1e-6
-        if np.any(mask):
-            candidate_pixels = candidate_pixels[:, mask]
-            intensities = intensities[mask]
-
-        # Select max_samples randomly from valid pixels
-        if candidate_pixels.shape[1] > max_samples:
-            indices = np.random.choice(
-                candidate_pixels.shape[1], max_samples, replace=False
-            )
-            image_flat = candidate_pixels[:, indices]
-        else:
-            image_flat = candidate_pixels
-
-        if verbose:
-            print(
-                f"Subsampled to {image_flat.shape[1]} pixels.", file=sys.stdout
-            )
+    # Select representative pixels for unmixing optimization
+    image_flat = select_representative_pixels(
+        image,
+        quantile=quantile,
+        max_samples=max_samples,
+        min_samples=min_samples,
+        verbose=verbose,
+    )
 
     image_orig = image_flat.copy()
     image = image_flat

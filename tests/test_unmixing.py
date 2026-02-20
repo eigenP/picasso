@@ -26,8 +26,13 @@ def test_cells3d_unmixing():
     # downscale as in the example to speed up
     mixed_downscaled = downscale_local_mean(mixed, (1, 2, 2))
 
+    # Use quantile=0.0 to include all valid pixels because the test image is small
     mat_iters = compute_unmixing_matrix(
-        mixed_downscaled, verbose=True, return_iters=True, max_iters=100
+        mixed_downscaled,
+        verbose=True,
+        return_iters=True,
+        max_iters=100,
+        quantile=0.0,
     )
     unmixing_matrix = mat_iters[-1]
 
