@@ -93,7 +93,30 @@ def select_representative_pixels(
     # Ensure minimum samples
     target_samples = max(target_samples, min_samples)
 
-    if n_high_signal > target_samples:
+    # 6. Fallback if not enough high signal pixels
+    if n_high_signal < min_samples and n_valid > n_high_signal:
+        if verbose:
+            print(
+                f"Warning: Only {n_high_signal} high-signal pixels found (threshold={quantile}). "
+                f"Falling back to top {min(n_valid, target_samples)} valid pixels.",
+                file=sys.stdout,
+            )
+        # Select top valid pixels based on max channel intensity
+        # We want to fill up to target_samples (or at least min_samples?)
+        # Let's target `target_samples` since we are falling back.
+
+        needed = target_samples
+        if needed > n_valid:
+            needed = n_valid
+
+        # Sort by max intensity
+        max_intensities = np.max(valid_pixels, axis=0)
+        # We want largest indices
+        # usage of argpartition is faster than argsort for top k
+        indices = np.argpartition(max_intensities, -needed)[-needed:]
+        final_pixels = valid_pixels[:, indices]
+
+    elif n_high_signal > target_samples:
         indices = np.random.choice(
             n_high_signal, target_samples, replace=False
         )
@@ -183,15 +206,25 @@ def regional_mi(x: npt.NDArray, y: npt.NDArray) -> float:
     return h_x + h_y - h_xy
 
 
-def minimize_mi(x: npt.NDArray, y: npt.NDArray, *, init_alpha=0.0) -> float:
+def minimize_mi(x: npt.NDArray, y: npt.NDArray, *, init_alpha=0.0, bins=100) -> float:
     def func(alpha: npt.NDArray):
-        return mutual_information(x, y - alpha * x)
+        return mutual_information(x, y - alpha * x, bins=bins)
+
+    # Heuristic: set initial step size (rhobeg) based on bin width relative to range.
+    # Assuming range is roughly constant and x is significant, a change in alpha
+    # needs to shift values by at least one bin width to change the histogram counts.
+    # bin_width ~ Range / bins.
+    # delta_y = delta_alpha * x. We need delta_y ~ bin_width.
+    # So delta_alpha ~ Range / (bins * x).
+    # Assuming Range/x is roughly order of 1, rhobeg should scale with 1/bins.
+    # For 100 bins, 1/100 = 0.01, which matches the original default.
+    rhobeg = 1.0 / bins
 
     result: npt.NDArray = fmin_cobyla(
         func=func,
         x0=np.array([init_alpha]),
         cons=[lambda a: a],
-        rhobeg=1e-2,
+        rhobeg=rhobeg,
         rhoend=1e-8,
     )
     return result.item()
@@ -222,8 +255,19 @@ def compute_unmixing_matrix(
     image_orig = image_flat.copy()
     image = image_flat
 
+    # Adaptive binning based on sample size
+    # Rule of thumb: scaled by cubic root of N, relative to 100 bins for 100k samples
+    # For 100k samples: (100k/100k)^(1/3) * 100 = 100 bins
+    # For 1k samples: (1k/100k)^(1/3) * 100 = 0.215 * 100 = 21 bins
+    # For 89 samples: (89/100k)^(1/3) * 100 = 0.096 * 100 = 9 bins
+    n_samples = image_flat.shape[1]
+    optimal_bins = int(100 * (n_samples / 100_000) ** (1 / 3))
+    optimal_bins = max(5, min(100, optimal_bins))
+
+    if verbose:
+        print(f"Using {optimal_bins} bins for mutual information estimation (N={n_samples})", file=sys.stdout)
+
     mat_cumul = np.eye(n_channels, dtype=float)
-    mat_last = np.eye(n_channels, dtype=float)
 
     mats = []
     for _ in tqdm(
@@ -240,15 +284,16 @@ def compute_unmixing_matrix(
                 if row == col:
                     continue
 
+                # Initialize alpha to 0.0 because we are estimating residual mixing
                 coef = minimize_mi(
-                    image[col], image[row], init_alpha=mat_last[row, col]
+                    image[col], image[row], init_alpha=0.0, bins=optimal_bins
                 )
                 mat[row, col] = -step_mult * coef
 
-        # check this early on
-        if np.allclose(mat, mat_last):
+        # Convergence check: check if the update matrix is close to identity
+        # This implies that all off-diagonal updates (coefs) were small.
+        if np.allclose(mat, np.eye(n_channels)):
             break
-        mat_last = mat.copy()
 
         # update matrix
         assert mat_cumul.shape == (n_channels, n_channels)
