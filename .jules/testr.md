@@ -5,3 +5,7 @@ This journal captures deep lessons about correctness, not routine test additions
 2024-05-22 - [Synthetic Ground Truth for Unsupervised Learning]
 Learning: Unsupervised algorithms like blind source separation are hard to test with real data because the ground truth is unknown. However, they can be rigorously verified by generating synthetic independent sources, mixing them with a known matrix, and asserting that the algorithm recovers the inverse. This transforms an "optimization problem" into a "functional correctness" test with strong assertions.
 Action: For unsupervised algorithms, always prioritize tests that generate data from the generative model the algorithm assumes (e.g., independent components) to verify recovery.
+
+2024-05-23 - [Physical Invariants as Test Oracles]
+Learning: Algorithms modeling physical processes (like spectral unmixing) must satisfy fundamental physical invariants like Scale Invariance (units don't matter) and Permutation Equivariance (channel labels don't matter). These properties can be tested exactly (or to high precision) even when the ground truth is unknown, providing a powerful "consistency check" that catches bugs in normalization, thresholding, and optimization logic.
+Action: When testing scientific code, identify physical symmetries (scaling, rotation, permutation, time-reversal) and implement property-based tests that verify them.
