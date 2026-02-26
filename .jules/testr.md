@@ -9,3 +9,6 @@ Action: For unsupervised algorithms, always prioritize tests that generate data 
 2024-05-23 - [Physical Invariants as Test Oracles]
 Learning: Algorithms modeling physical processes (like spectral unmixing) must satisfy fundamental physical invariants like Scale Invariance (units don't matter) and Permutation Equivariance (channel labels don't matter). These properties can be tested exactly (or to high precision) even when the ground truth is unknown, providing a powerful "consistency check" that catches bugs in normalization, thresholding, and optimization logic.
 Action: When testing scientific code, identify physical symmetries (scaling, rotation, permutation, time-reversal) and implement property-based tests that verify them.
+2024-05-23 - [Pairwise Optimization Sufficiency]
+Learning: Multi-channel unmixing can be effectively verified by checking the global reduction of Total Correlation (sum of pairwise Mutual Information). The algorithm's strategy of iterative pairwise minimization (coordinate descent) converges to the global optimum for diagonally dominant mixing, confirming that N-channel correctness can be inferred from pairwise interactions.
+Action: When testing iterative pairwise algorithms, verify the global property (Total Correlation) to ensure that local improvements aggregate correctly to a global solution.
