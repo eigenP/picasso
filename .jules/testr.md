@@ -17,3 +17,7 @@ Action: When testing iterative pairwise algorithms, verify the global property (
 2025-05-23 - [Statistical Consistency of Estimators]
 Learning: Optimization algorithms that estimate parameters from data must behave as consistent estimators—error should decrease as sample size $N$ increases. Verifying this monotonic error reduction confirms that the algorithm effectively utilizes additional information (law of large numbers) and that adaptive strategies (like binning) scale correctly with $N$, distinguishing a "lucky" fit from a true statistical convergence.
 Action: For estimation algorithms, implement tests that measure error across logarithmic steps of sample size (e.g., $N, 10N, 50N$) and assert monotonic improvement.
+
+2025-05-24 - [Algorithmic Idempotence as a Convergence Guarantee]
+Learning: Blind source separation algorithms must be idempotent: $U(U(I)) = I$. If an image is successfully unmixed into independent sources, passing those sources back through the algorithm should yield the Identity matrix (no further updates). This confirms that the algorithm effectively recognizes the global optimum and avoids "over-unmixing" or hallucinating anti-correlations where none exist. Testing idempotence verifies the stability of the fixed point of the algorithm.
+Action: For iterative refinement or unmixing algorithms, implement idempotence checks that feed the optimized output back as input and assert a null-op response.
