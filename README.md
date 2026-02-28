@@ -9,7 +9,7 @@ A simple python implementation of the below paper for the blind linear unmixing 
 You can install `picasso` directly from GitHub using pip:
 
 ```bash
-pip install "git+https://github.com/biomicrodev/picasso.git"
+pip install "git+https://github.com/eigenp/picasso.git"
 ```
 
 ## Notes
