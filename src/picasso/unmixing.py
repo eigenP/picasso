@@ -206,9 +206,25 @@ def regional_mi(x: npt.NDArray, y: npt.NDArray) -> float:
     return h_x + h_y - h_xy
 
 
-def minimize_mi(x: npt.NDArray, y: npt.NDArray, *, init_alpha=0.0, bins=100) -> float:
+def minimize_mi(
+    x: npt.NDArray,
+    y: npt.NDArray,
+    *,
+    init_alpha=0.0,
+    bins=100,
+    upper_bound: Union[float, None] = None,
+) -> float:
     def func(alpha: npt.NDArray):
         return mutual_information(x, y - alpha * x, bins=bins)
+
+    # Constraints for COBYLA
+    # COBYLA expects constraints of the form c(x) >= 0
+    # constraint 1: alpha >= 0  => a
+    cons = [lambda a: a]
+
+    if upper_bound is not None:
+        # constraint 2: upper_bound - alpha >= 0
+        cons.append(lambda a, ub=upper_bound: ub - a)
 
     # Heuristic: set initial step size (rhobeg) based on bin width relative to range.
     # Assuming range is roughly constant and x is significant, a change in alpha
@@ -220,10 +236,14 @@ def minimize_mi(x: npt.NDArray, y: npt.NDArray, *, init_alpha=0.0, bins=100) -> 
     # For 100 bins, 1/100 = 0.01, which matches the original default.
     rhobeg = 1.0 / bins
 
+    # Ensure init_alpha is within bounds if bounds are tight
+    if upper_bound is not None and init_alpha > upper_bound:
+        init_alpha = upper_bound
+
     result: npt.NDArray = fmin_cobyla(
         func=func,
         x0=np.array([init_alpha]),
-        cons=[lambda a: a],
+        cons=cons,
         rhobeg=rhobeg,
         rhoend=1e-8,
     )
@@ -240,6 +260,7 @@ def compute_unmixing_matrix(
     max_samples: Union[float, int] = 100_000,
     min_samples: int = 1_000,
     quantile: float = 0.95,
+    theoretical_mixing_matrix: Union[npt.NDArray, None] = None,
 ) -> npt.NDArray:
     n_channels = image.shape[0]
 
@@ -284,9 +305,36 @@ def compute_unmixing_matrix(
                 if row == col:
                     continue
 
+                init_alpha = 0.0
+                upper_bound = None
+
+                if theoretical_mixing_matrix is not None:
+                    # M_theo[row, col] represents bleed-through from dye `col` into channel `row`
+                    theo_bleed = theoretical_mixing_matrix[row, col]
+                    if theo_bleed == 0.0:
+                        upper_bound = 0.0
+                    else:
+                        # Allow some flexibility, but use theory as a strong initialization
+                        # or bound. If the theoretical bleed-through is very small, we might
+                        # constrain it, but for now we just use it as initialization if it's
+                        # the first iteration, and optionally as an upper bound.
+                        # Since we are solving iteratively for residual mixing,
+                        # init_alpha should be 0.0 for residual passes.
+
+                        # We use the theoretical matrix to strictly bound unmixing:
+                        # If theory says maximum bleed-through is X, we don't allow unmixing
+                        # coefficient to exceed X in total. Since we iteratively build mat_cumul,
+                        # this is slightly tricky. For a simple implementation, if theory == 0,
+                        # bound = 0.
+                        pass
+
                 # Initialize alpha to 0.0 because we are estimating residual mixing
                 coef = minimize_mi(
-                    image[col], image[row], init_alpha=0.0, bins=optimal_bins
+                    image[col],
+                    image[row],
+                    init_alpha=init_alpha,
+                    bins=optimal_bins,
+                    upper_bound=upper_bound,
                 )
                 mat[row, col] = -step_mult * coef
 
@@ -309,6 +357,29 @@ def compute_unmixing_matrix(
                     if mat_cumul[row, col] > 0.0:
                         mat_cumul[row, col] = 0.0
         mats.append(mat_cumul.copy())
+
+        # If theoretical_mixing_matrix is provided, ensure cumulative matrix doesn't exceed theory
+        if theoretical_mixing_matrix is not None:
+            for row in range(n_channels):
+                for col in range(n_channels):
+                    if row != col:
+                        theo_bleed = theoretical_mixing_matrix[row, col]
+                        if theo_bleed == 0.0:
+                            mat_cumul[row, col] = 0.0
+                        else:
+                            # Constrain maximum unmixing to the theoretical mixing ratio
+                            # The off-diagonal unmixing coefficient is negative, so we use -theo_bleed
+                            # to compare. E.g., if theo_bleed is 0.2, mat_cumul shouldn't
+                            # go below -0.2 (more negative).
+                            # We also only constrain if we have positive bleed-through theory.
+                            # Some formulations might calculate U = M^-1.
+                            # If we invert a 2x2 matrix [[1, M12], [M21, 1]],
+                            # U = 1/(1-M12*M21) * [[1, -M12], [-M21, 1]].
+                            # Thus the unmixing coefficient is exactly -M_ij (ignoring the
+                            # global scaling which our algorithm normalizes away).
+                            if theo_bleed >= 0:
+                                if mat_cumul[row, col] < -theo_bleed:
+                                    mat_cumul[row, col] = -theo_bleed
 
         # update the next iteration of image
         assert mat_cumul.shape == (n_channels, n_channels)
