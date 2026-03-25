@@ -343,43 +343,41 @@ def compute_unmixing_matrix(
         if np.allclose(mat, np.eye(n_channels)):
             break
 
-        # update matrix
-        assert mat_cumul.shape == (n_channels, n_channels)
-        mat_cumul = mat @ mat_cumul
+        # If theoretical_mixing_matrix is provided, ensure cumulative matrix doesn't exceed theory
+        # BEFORE we commit the update to mat_cumul.
+        # We compute mat_cumul_next to clamp it.
+        mat_cumul_next = mat @ mat_cumul
 
         # constrain coefficients to 1.0 along the diagonal, and negative for
         # off-diagonal entries
         for row in range(n_channels):
             for col in range(n_channels):
                 if row == col:
-                    mat_cumul[row, col] = 1.0
+                    mat_cumul_next[row, col] = 1.0
                 else:
-                    if mat_cumul[row, col] > 0.0:
-                        mat_cumul[row, col] = 0.0
-        mats.append(mat_cumul.copy())
+                    if mat_cumul_next[row, col] > 0.0:
+                        mat_cumul_next[row, col] = 0.0
 
-        # If theoretical_mixing_matrix is provided, ensure cumulative matrix doesn't exceed theory
         if theoretical_mixing_matrix is not None:
+            # We want to bound U so it doesn't unmix more than the mathematical limit.
+            # For a 2x2 matrix M with 1s on diag, M^-1 has off-diagonals bounded by -M_ij
+            # when normalized. So U_ij >= -M_theo_ij.
+            # But we must compute the exact U from M_theo.
+
+            # Simple per-element constraint works well:
             for row in range(n_channels):
                 for col in range(n_channels):
                     if row != col:
                         theo_bleed = theoretical_mixing_matrix[row, col]
                         if theo_bleed == 0.0:
-                            mat_cumul[row, col] = 0.0
+                            mat_cumul_next[row, col] = 0.0
                         else:
-                            # Constrain maximum unmixing to the theoretical mixing ratio
-                            # The off-diagonal unmixing coefficient is negative, so we use -theo_bleed
-                            # to compare. E.g., if theo_bleed is 0.2, mat_cumul shouldn't
-                            # go below -0.2 (more negative).
-                            # We also only constrain if we have positive bleed-through theory.
-                            # Some formulations might calculate U = M^-1.
-                            # If we invert a 2x2 matrix [[1, M12], [M21, 1]],
-                            # U = 1/(1-M12*M21) * [[1, -M12], [-M21, 1]].
-                            # Thus the unmixing coefficient is exactly -M_ij (ignoring the
-                            # global scaling which our algorithm normalizes away).
                             if theo_bleed >= 0:
-                                if mat_cumul[row, col] < -theo_bleed:
-                                    mat_cumul[row, col] = -theo_bleed
+                                if mat_cumul_next[row, col] < -theo_bleed:
+                                    mat_cumul_next[row, col] = -theo_bleed
+
+        mat_cumul = mat_cumul_next
+        mats.append(mat_cumul.copy())
 
         # update the next iteration of image
         assert mat_cumul.shape == (n_channels, n_channels)
