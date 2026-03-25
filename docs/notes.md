@@ -32,8 +32,26 @@ This is where the theoretical bound $M_{theo}$ saves the day. $M_{theo}$ is comp
 
 We tell the algorithm: "You can optimize Mutual Information all you want, but you are mathematically forbidden from subtracting more than 0.10 times Channel 1." The optimizer tries to subtract 0.25, hits the wall at 0.10, and stops. It successfully removes the 0.10 optical bleed-through and leaves the 0.15 biological co-localization intact.
 
+## The Fallacy of Subtracting "-1.0"
+It is common practice to simply subtract the entirety of Channel 1 from Channel 2 (e.g., `Unmixed_2 = Image_2 - 1.0 * Image_1`) to completely erase bleed-through. While this *looks* like it works in image viewers (because negative values are clamped to black), it is mathematically disastrous for co-localized biology.
+
+If Dye 1 is 10,000 photons and Dye 2 is 5,000 photons, and true bleed-through is 10%:
+$$ \text{Unmixed}_2 = 5,000 - 0.90 \times 10,000 = -4,000 $$
+By subtracting `-1.0` instead of `-0.10`, you didn't just remove the 1,000 photons of bleed-through—you also deleted 4,000 photons of your real Dye 2 signal, creating a massive artificial anti-correlation ("holes" in Channel 2 wherever Channel 1 is bright).
+
+## Evaluating Unmixing with Negative Histograms (The "Shift to Negative" Metric)
+Because fluorescence is physically additive (you cannot emit negative photons), a common intuition is to use a strict "Non-Negative" constraint: *stop unmixing the moment any pixel drops below zero.*
+
+This fails in reality because of **camera read noise and shot noise**. Even if an algorithm perfectly removes bleed-through leaving a true signal of `0.0`, camera noise creates a Gaussian distribution around zero (e.g., `-5, 3, 0, -2`). Therefore, in a perfectly unmixed image, **half of the background pixels will naturally be negative.**
+
+If you plot a histogram of pixel intensities for Channel 2 after unmixing, you can visually evaluate the success:
+1. **Healthy Unmixing (e.g., -0.75 bounded by physics):** The peak (mode) of the background distribution is pinned tightly to `0`. The negative values form a steep, symmetric drop-off representing only the left tail of the camera's Gaussian noise floor.
+2. **Over-Unmixing (e.g., forced -1.0):** The entire distribution shifts massively to the left. The peak is no longer at `0`, and a huge chunk of pixels is shoved deep into the negatives. This "fat negative tail" represents real biological structure that was erroneously subtracted away.
+
+Thus, we **can** use the shift to negative as a metric, provided we look at the *distribution* (ensuring the mode remains at 0 and the negative tail matches the noise profile) rather than preventing individual noisy pixels from dropping below zero.
+
 ## Synthetic Stress Tests (In Silico)
-To verify this behavior, we built three synthetic stress tests:
+To verify this behavior, we built synthetic stress tests:
 
 1. **The "Floodlight and Candle" Test (SNR limits)**
    - Setup: Synthetic image where Dye 1 has intensities ~50,000 and Dye 2 ~100. Mix them with 10% bleed-through. Add Poisson noise.
