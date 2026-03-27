@@ -125,9 +125,7 @@ def select_representative_pixels(
         final_pixels = valid_pixels[:, indices]
 
     elif n_high_signal > target_samples:
-        indices = np.random.choice(
-            n_high_signal, target_samples, replace=False
-        )
+        indices = np.linspace(0, n_high_signal - 1, target_samples, dtype=int)
         final_pixels = high_signal_pixels[:, indices]
         if verbose:
             print(
@@ -145,6 +143,37 @@ def select_representative_pixels(
     return final_pixels
 
 
+
+def _downscale_local_mean(image: npt.NDArray, factors: tuple[int, ...]) -> npt.NDArray:
+    """
+    Fast block reduction downscaling using pure NumPy.
+    Truncates the remainder if dimensions are not divisible by factors.
+    """
+    if image.ndim != len(factors):
+        raise ValueError(
+            f"Downscale factors length ({len(factors)}) must match image dimensions ({image.ndim})."
+        )
+
+    # 1. Calculate the new shape, truncating the remainder
+    new_shape = tuple(s // f for s, f in zip(image.shape, factors))
+
+    # 2. Crop the image to exactly fit the blocks
+    slices = tuple(slice(0, n * f) for n, f in zip(new_shape, factors))
+    cropped = image[slices]
+
+    # 3. Reshape to interleave block dimensions
+    reshaped_dims = []
+    for n, f in zip(new_shape, factors):
+        reshaped_dims.extend([n, f])
+
+    reshaped = cropped.reshape(reshaped_dims)
+
+    # 4. Average over the factor axes (which end up at odd indices: 1, 3, 5...)
+    axes_to_mean = tuple(range(1, 2 * image.ndim, 2))
+
+    return reshaped.mean(axis=axes_to_mean)
+
+
 def shannon_entropy(a: npt.NDArray) -> float:
     """
     This runs very often, so we should do our best to make this fast.
@@ -154,7 +183,7 @@ def shannon_entropy(a: npt.NDArray) -> float:
     # stick with .ravel()
     a = a.ravel()
     a /= a.sum()
-    a = a[np.nonzero(a != 0)]
+    a = a[a > 0]
     a *= np.log2(a)
     return -a.sum().item()
 
@@ -261,6 +290,7 @@ def minimize_mi(
 def compute_unmixing_matrix(
     images: Sequence[npt.NDArray],
     *,
+    downscale: Union[int, tuple[int, ...], None] = None,
     max_iters=1_000,
     step_mult=0.1,
     verbose=False,
@@ -272,9 +302,22 @@ def compute_unmixing_matrix(
 ) -> npt.NDArray:
     n_channels = len(images)
 
+    if downscale is not None:
+        if isinstance(downscale, int):
+            factors = tuple(downscale for _ in range(images[0].ndim))
+        else:
+            factors = downscale
+
+        if verbose:
+            print(f"Downscaling images by factors {factors} before pixel selection...", file=sys.stdout)
+
+        processed_images = [_downscale_local_mean(img, factors) for img in images]
+    else:
+        processed_images = images
+
     # Select representative pixels for unmixing optimization
     image_flat = select_representative_pixels(
-        images,
+        processed_images,
         quantile=quantile,
         max_samples=max_samples,
         min_samples=min_samples,
