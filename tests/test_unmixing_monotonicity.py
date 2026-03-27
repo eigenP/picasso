@@ -66,7 +66,7 @@ def test_unmixing_monotonic_convergence():
     # quantile=0.0 and max_samples=n_pixels ensures we test on the exact same data
     # that we calculate MI on, avoiding stochastic subsampling noise.
     mats = compute_unmixing_matrix(
-        mixed_input,
+        list(mixed_input),
         verbose=False,
         max_iters=15,
         quantile=0.0,

@@ -52,12 +52,12 @@ def test_cells3d_constrained_unmixing():
 
     # Unconstrained unmixing
     U_unconstrained = compute_unmixing_matrix(
-        mixed_image, max_iters=50, step_mult=0.5, verbose=False
+        list(mixed_image), max_iters=50, step_mult=0.5, verbose=False
     )
 
     # Constrained unmixing
     U_constrained = compute_unmixing_matrix(
-        mixed_image, max_iters=50, step_mult=0.5, verbose=False,
+        list(mixed_image), max_iters=50, step_mult=0.5, verbose=False,
         theoretical_mixing_matrix=M_theo
     )
 

@@ -43,7 +43,7 @@ def test_unmixing_invariants():
 
     # 2. Compute Baseline Unmixing Matrix
     u_base = compute_unmixing_matrix(
-        mixed,
+        list(mixed),
         verbose=False,
         max_iters=20, # Sufficient for convergence on this simple case
         quantile=0.0, # Use all pixels to avoid stochastic selection noise
@@ -80,7 +80,7 @@ def test_unmixing_invariants():
     mixed_perm = mixed[::-1, :, :] # (2, N, 1) -> (2, N, 1) with channels swapped
 
     u_perm = compute_unmixing_matrix(
-        mixed_perm,
+        list(mixed_perm),
         verbose=False,
         max_iters=20,
         quantile=0.0,

@@ -48,7 +48,7 @@ def test_unmixing_rejects_anticorrelated_signals():
     # 2. Compute Unmixing Matrix
     # We use all pixels to verify the mathematical behavior precisely
     u_computed = compute_unmixing_matrix(
-        sources,
+        list(sources),
         quantile=0.0,
         max_samples=n_pixels,
         verbose=False

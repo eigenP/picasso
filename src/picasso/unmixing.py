@@ -1,6 +1,6 @@
 import math
 import sys
-from typing import Union
+from typing import Union, Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -11,14 +11,19 @@ from tqdm import tqdm
 
 
 def select_representative_pixels(
-    image: npt.NDArray,
+    images: Sequence[npt.NDArray],
     quantile: float = 0.95,
     max_samples: Union[float, int] = 100_000,
     min_samples: int = 1_000,
     verbose: bool = False,
 ) -> npt.NDArray:
-    n_channels = image.shape[0]
-    n_pixels = image[0].size
+    n_channels = len(images)
+    n_pixels = images[0].size
+
+    try:
+        image = np.stack(images, axis=0)
+    except MemoryError:
+        raise MemoryError("Not enough memory to stack the input images. Please provide smaller images or fewer channels.")
 
     # Flatten the image
     image_flat = image.reshape(n_channels, -1)
@@ -84,9 +89,12 @@ def select_representative_pixels(
     # 5. Subsampling
     # Determine target sample count
     if isinstance(max_samples, float):
-        # Interpret as a fraction of the ORIGINAL total pixels
-        # (or maybe valid pixels? User intent is likely "fraction of image")
-        target_samples = int(max_samples * n_pixels)
+        if max_samples <= 1.0:
+            # Interpret as a fraction of the ORIGINAL total pixels
+            target_samples = int(max_samples * n_pixels)
+        else:
+            # Float provided as absolute count (e.g. 1e6)
+            target_samples = int(max_samples)
     else:
         target_samples = max_samples
 
@@ -251,7 +259,7 @@ def minimize_mi(
 
 
 def compute_unmixing_matrix(
-    image: npt.NDArray,
+    images: Sequence[npt.NDArray],
     *,
     max_iters=1_000,
     step_mult=0.1,
@@ -262,11 +270,11 @@ def compute_unmixing_matrix(
     quantile: float = 0.95,
     theoretical_mixing_matrix: Union[npt.NDArray, None] = None,
 ) -> npt.NDArray:
-    n_channels = image.shape[0]
+    n_channels = len(images)
 
     # Select representative pixels for unmixing optimization
     image_flat = select_representative_pixels(
-        image,
+        images,
         quantile=quantile,
         max_samples=max_samples,
         min_samples=min_samples,
@@ -394,26 +402,35 @@ def compute_unmixing_matrix(
 
 
 def apply_unmixing_matrix(
-    image: npt.NDArray, matrix: npt.NDArray
-) -> npt.NDArray:
+    images: Sequence[npt.NDArray], matrix: npt.NDArray
+) -> list[npt.NDArray]:
     """
-    Apply unmixing matrix to an image of arbitrary dimensions.
+    Apply unmixing matrix to a sequence of images of arbitrary dimensions.
 
     Parameters
     ----------
-    image : ndarray
-        The input image of shape (C, ...).
+    images : Sequence[npt.NDArray]
+        A sequence of image arrays, one per channel. Each array should have the same shape.
     matrix : ndarray
         The unmixing matrix of shape (C, C).
 
     Returns
     -------
-    unmixed_image : ndarray
-        The unmixed image of shape (C, ...).
+    unmixed_images : list[npt.NDArray]
+        A list of unmixed image arrays, one per channel.
     """
-    if matrix.shape[1] != image.shape[0]:
+    if matrix.shape[1] != len(images):
         raise ValueError(
-            f"Matrix input channels ({matrix.shape[1]}) must match image "
-            f"channels ({image.shape[0]})"
+            f"Matrix input channels ({matrix.shape[1]}) must match number of image "
+            f"channels ({len(images)})"
         )
-    return np.tensordot(matrix, image, axes=1)
+
+    try:
+        image = np.stack(images, axis=0)
+    except MemoryError:
+        raise MemoryError("Not enough memory to stack the input images. Please provide smaller images or fewer channels.")
+
+    unmixed = np.tensordot(matrix, image, axes=1)
+
+    # Return as a list of individual channel arrays
+    return [unmixed[i] for i in range(unmixed.shape[0])]

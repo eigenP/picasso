@@ -28,7 +28,7 @@ def test_cells3d_unmixing():
 
     # Use quantile=0.0 to include all valid pixels because the test image is small
     mat_iters = compute_unmixing_matrix(
-        mixed_downscaled,
+        list(mixed_downscaled),
         verbose=True,
         return_iters=True,
         max_iters=100,
