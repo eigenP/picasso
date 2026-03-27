@@ -45,7 +45,7 @@ def test_unmixing_shift_invariance():
 
     # 2. Compute Baseline Unmixing Matrix
     u_base = compute_unmixing_matrix(
-        mixed,
+        list(mixed),
         verbose=False,
         max_iters=20, # Sufficient for convergence
         quantile=0.0, # Use all pixels to avoid stochastic selection noise from shifting percentiles
@@ -67,7 +67,7 @@ def test_unmixing_shift_invariance():
 
     # 4. Compute Unmixing Matrix on Shifted Data
     u_shifted = compute_unmixing_matrix(
-        mixed_shifted,
+        list(mixed_shifted),
         verbose=False,
         max_iters=20,
         quantile=0.0,

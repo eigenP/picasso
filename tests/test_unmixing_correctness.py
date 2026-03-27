@@ -34,7 +34,7 @@ def test_blind_source_separation_synthetic():
     # 2. Verify Identity Case (Zero-Mixing Response)
     # If sources are already independent, the algorithm should return Identity
     u_identity = compute_unmixing_matrix(
-        sources,
+        list(sources),
         quantile=0.0,  # Use all pixels to test optimization logic purely
         max_samples=n_pixels,
         verbose=False
@@ -70,7 +70,7 @@ def test_blind_source_separation_synthetic():
 
     # 4. Perform Unmixing
     u_computed = compute_unmixing_matrix(
-        mixed,
+        list(mixed),
         quantile=0.0,
         max_samples=n_pixels,
         verbose=False

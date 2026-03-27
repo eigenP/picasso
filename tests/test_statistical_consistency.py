@@ -62,7 +62,7 @@ def test_unmixing_consistency_with_sample_size():
             # behavior on the full dataset N, not a subsample.
             # max_samples=n_samples: Ensure no subsampling occurs.
             computed_U = compute_unmixing_matrix(
-                mixed_input,
+        list(mixed_input),
                 quantile=0.0,
                 max_samples=n_samples,
                 verbose=False,

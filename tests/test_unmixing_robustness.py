@@ -16,7 +16,8 @@ def test_unmixing_small_samples():
     # The robustness fix should use all 100 pixels (since 100 < 1000)
     # And adaptive binning should use small number of bins.
 
-    matrix = compute_unmixing_matrix(image, verbose=True, max_iters=5)
+    matrix = compute_unmixing_matrix(
+        list(image), verbose=True, max_iters=5)
 
     assert matrix.shape == (2, 2)
     # Check diagonals are 1
@@ -39,7 +40,7 @@ def test_select_representative_pixels_fallback():
     # The function should return 50 pixels (fallback to valid ones).
 
     pixels = select_representative_pixels(
-        image,
+        list(image),
         quantile=0.99,
         min_samples=50,
         max_samples=50,

@@ -67,7 +67,7 @@ def test_three_channel_unmixing_and_information_reduction():
     # Use quantile=0.0 to include all pixels, avoiding subsampling artifacts in this test
     # max_samples >= n_pixels ensures no subsampling
     computed_U = compute_unmixing_matrix(
-        mixed_input,
+        list(mixed_input),
         quantile=0.0,
         max_samples=n_pixels,
         verbose=True

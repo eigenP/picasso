@@ -65,7 +65,7 @@ def test_floodlight_and_candle(dye1_max, dye2_max, expected_max_error):
 
     # Unconstrained unmixing
     U = compute_unmixing_matrix(
-        mixed_noisy,
+        list(mixed_noisy),
         max_iters=50,
         quantile=0.0,  # Use all pixels to help with noise
         step_mult=0.1
@@ -93,7 +93,7 @@ def test_floodlight_and_candle_failures(dye1_max, dye2_max):
     mixed = np.tensordot(M_true, sources, axes=1)
     mixed_noisy = add_poisson_noise(mixed)
     U = compute_unmixing_matrix(
-        mixed_noisy,
+        list(mixed_noisy),
         max_iters=50,
         quantile=0.0,
         step_mult=0.1
@@ -133,7 +133,7 @@ def test_perfect_colocalization_trap():
 
     # 1. Empirical (Unconstrained) Unmixing
     U_empirical = compute_unmixing_matrix(
-        mixed,
+        list(mixed),
         max_iters=50,
         quantile=0.5
     )
@@ -149,7 +149,7 @@ def test_perfect_colocalization_trap():
     ])
 
     U_constrained = compute_unmixing_matrix(
-        mixed,
+        list(mixed),
         max_iters=50,
         quantile=0.5,
         theoretical_mixing_matrix=M_theo
@@ -209,7 +209,7 @@ def test_real_spectra_theoretical_bound():
 
     # Unmix using the exact same M_theo
     U_constrained = compute_unmixing_matrix(
-        mixed_noisy,
+        list(mixed_noisy),
         max_iters=50,
         quantile=0.5,
         theoretical_mixing_matrix=M_theo
@@ -255,7 +255,7 @@ def test_bad_physics():
     ])
 
     U_bad_physics = compute_unmixing_matrix(
-        mixed,
+        list(mixed),
         max_iters=50,
         quantile=0.5,
         theoretical_mixing_matrix=M_theo_bad

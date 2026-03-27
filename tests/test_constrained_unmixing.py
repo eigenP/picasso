@@ -31,13 +31,13 @@ def test_constrained_unmixing():
     # 1. Unconstrained unmixing
     # It should find the ~0.5 actual mixing
     U_unconstrained = compute_unmixing_matrix(
-        mixed, max_iters=100, step_mult=0.5, quantile=0.0, min_samples=100, max_samples=N
+        list(mixed), max_iters=100, step_mult=0.5, quantile=0.0, min_samples=100, max_samples=N
     )
 
     # 2. Constrained unmixing
     # It should be bounded by M_theo
     U_constrained = compute_unmixing_matrix(
-        mixed, max_iters=100, step_mult=0.5, quantile=0.0, min_samples=100, max_samples=N,
+        list(mixed), max_iters=100, step_mult=0.5, quantile=0.0, min_samples=100, max_samples=N,
         theoretical_mixing_matrix=M_theo
     )
 

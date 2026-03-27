@@ -42,7 +42,7 @@ def test_unmixing_idempotence():
     # We use quantile=0.0 to include all pixels and max_samples=n_pixels
     # to avoid stochastic subsampling noise which could perturb the fixed point.
     U_first = compute_unmixing_matrix(
-        mixed_img,
+        list(mixed_img),
         quantile=0.0,
         max_samples=n_pixels,
         verbose=False
@@ -61,7 +61,7 @@ def test_unmixing_idempotence():
     # Because the signals are now independent, the algorithm should recognize
     # this and return the Identity matrix.
     U_second = compute_unmixing_matrix(
-        unmixed_img,
+        list(unmixed_img),
         quantile=0.0,
         max_samples=n_pixels,
         verbose=False
