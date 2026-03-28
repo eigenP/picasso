@@ -1,11 +1,11 @@
 import math
 import sys
-from typing import Union, Sequence
+from typing import Union, Sequence, Literal
 
 import numpy as np
 import numpy.typing as npt
 from fast_histogram import histogram2d, histogram1d
-from scipy.optimize import fmin_cobyla
+from scipy.optimize import fmin_cobyla, minimize_scalar
 from skimage.util import img_as_float
 from tqdm import tqdm
 
@@ -188,6 +188,22 @@ def shannon_entropy(a: npt.NDArray) -> float:
     return -a.sum().item()
 
 
+def compute_optimal_bins(n_samples: int) -> int:
+    """
+    Computes the optimal number of bins for 2D histogram estimation of mutual information.
+    Target ~10 samples per joint bin: B^2 = N / 10 => B = sqrt(N / 10).
+    Constrains the bins to an array of "clean" divisors of 256 to prevent aliasing artifacts
+    with 8-bit image data.
+    """
+    target_bins = int(math.sqrt(n_samples / 10))
+    allowed_bins = np.array([8, 16, 32, 64, 128, 256])
+
+    valid_options = allowed_bins[allowed_bins <= target_bins]
+    if len(valid_options) == 0:
+        return 8
+    return int(valid_options[-1])
+
+
 def mutual_information(x: npt.NDArray, y: npt.NDArray, *, bins=100) -> float:
     x = x.ravel()
     y = y.ravel()
@@ -247,44 +263,89 @@ def minimize_mi(
     x: npt.NDArray,
     y: npt.NDArray,
     *,
-    init_alpha=0.0,
-    bins=100,
+    init_alpha: float = 0.0,
+    bins: int = 100,
     upper_bound: Union[float, None] = None,
+    method: Literal['brent', 'cobyla'] = 'brent',
 ) -> float:
-    def func(alpha: npt.NDArray):
+    """
+    Minimizes the mutual information between x and (y - alpha * x) to find
+    the optimal unmixing coefficient alpha.
+    """
+    def func(alpha: float) -> float:
+        # Evaluate the cost function (Mutual Information)
         return mutual_information(x, y - alpha * x, bins=bins)
 
-    # Constraints for COBYLA
-    # COBYLA expects constraints of the form c(x) >= 0
-    # constraint 1: alpha >= 0  => a
-    cons = [lambda a: a]
+    if method == 'brent':
+        # Brent's method: Golden Section Search + Parabolic Interpolation.
+        # It is highly robust for 1D scalar optimization on non-smooth topologies.
 
-    if upper_bound is not None:
-        # constraint 2: upper_bound - alpha >= 0
-        cons.append(lambda a, ub=upper_bound: ub - a)
+        # 'bounded' requires finite bounds. If upper_bound is None, we default
+        # to a generous limit (e.g., 100.0) to account for extreme dynamic range
+        # mismatches without searching infinitely.
+        brent_upper = upper_bound if upper_bound is not None else 100.0
 
-    # Heuristic: set initial step size (rhobeg) based on bin width relative to range.
-    # Assuming range is roughly constant and x is significant, a change in alpha
-    # needs to shift values by at least one bin width to change the histogram counts.
-    # bin_width ~ Range / bins.
-    # delta_y = delta_alpha * x. We need delta_y ~ bin_width.
-    # So delta_alpha ~ Range / (bins * x).
-    # Assuming Range/x is roughly order of 1, rhobeg should scale with 1/bins.
-    # For 100 bins, 1/100 = 0.01, which matches the original default.
-    rhobeg = 1.0 / bins
+        # If the bound is effectively zero, skip the heavy lifting
+        if brent_upper <= 0.0:
+            return 0.0
 
-    # Ensure init_alpha is within bounds if bounds are tight
-    if upper_bound is not None and init_alpha > upper_bound:
-        init_alpha = upper_bound
+        # Ensure init_alpha is valid
+        if init_alpha > brent_upper:
+            init_alpha = brent_upper
+        elif init_alpha < 0.0:
+            init_alpha = 0.0
 
-    result: npt.NDArray = fmin_cobyla(
-        func=func,
-        x0=np.array([init_alpha]),
-        cons=cons,
-        rhobeg=rhobeg,
-        rhoend=1e-8,
-    )
-    return result.item()
+        # We use bounded Brent search for robust bracketing of non-smooth topologies
+        result = minimize_scalar(
+            func,
+            bounds=(0.0, brent_upper),
+            method='bounded',
+            options={'xatol': 1e-4, 'maxiter': 100}
+        )
+
+        if not result.success:
+            print(f"Warning: Brent minimization failed to converge: {result.message}", file=sys.stdout)
+
+        opt_alpha = float(result.x)
+
+        # We generally do not revert to 0 unless it's drastically worse because
+        # Brent is rigorous, but for legacy backwards compatibility with some
+        # delicate test tolerances, we bound it if it goes very wrong.
+        if opt_alpha > 1e-6:
+            cost_zero = func(0.0)
+            cost_opt = func(opt_alpha)
+            if cost_opt > cost_zero:
+                opt_alpha = 0.0
+
+        return opt_alpha
+
+    elif method == 'cobyla':
+        # COBYLA: Multivariate optimizer applied to a 1D problem.
+        # Retained for legacy comparisons and benchmarking.
+        cons = [lambda a: a]  # constraint: alpha >= 0
+        if upper_bound is not None:
+            cons.append(lambda a, ub=upper_bound: ub - a)
+
+        # Ensure init_alpha is within bounds to prevent immediate constraint violation
+        start_alpha = init_alpha
+        if upper_bound is not None and start_alpha > upper_bound:
+            start_alpha = upper_bound
+
+        # Heuristic step size based on bin width
+        rhobeg = 1.0 / bins
+
+        result_array: npt.NDArray = fmin_cobyla(
+            func=func,
+            x0=np.array([start_alpha]),
+            cons=cons,
+            rhobeg=rhobeg,
+            rhoend=1e-8,
+            disp=0  # Suppress internal scipy printing
+        )
+        return float(result_array.item())
+
+    else:
+        raise ValueError(f"Unknown optimization method: '{method}'. Use 'brent' or 'cobyla'.")
 
 
 def compute_unmixing_matrix(
@@ -299,6 +360,7 @@ def compute_unmixing_matrix(
     min_samples: int = 1_000,
     quantile: float = 0.95,
     theoretical_mixing_matrix: Union[npt.NDArray, None] = None,
+    method: Literal['brent', 'cobyla'] = 'cobyla',
 ) -> npt.NDArray:
     n_channels = len(images)
 
@@ -327,14 +389,8 @@ def compute_unmixing_matrix(
     image_orig = image_flat.copy()
     image = image_flat
 
-    # Adaptive binning based on sample size
-    # Rule of thumb: scaled by cubic root of N, relative to 100 bins for 100k samples
-    # For 100k samples: (100k/100k)^(1/3) * 100 = 100 bins
-    # For 1k samples: (1k/100k)^(1/3) * 100 = 0.215 * 100 = 21 bins
-    # For 89 samples: (89/100k)^(1/3) * 100 = 0.096 * 100 = 9 bins
     n_samples = image_flat.shape[1]
-    optimal_bins = int(100 * (n_samples / 100_000) ** (1 / 3))
-    optimal_bins = max(5, min(100, optimal_bins))
+    optimal_bins = compute_optimal_bins(n_samples)
 
     if verbose:
         print(f"Using {optimal_bins} bins for mutual information estimation (N={n_samples})", file=sys.stdout)
@@ -386,6 +442,7 @@ def compute_unmixing_matrix(
                     init_alpha=init_alpha,
                     bins=optimal_bins,
                     upper_bound=upper_bound,
+                    method=method,
                 )
                 mat[row, col] = -step_mult * coef
 
