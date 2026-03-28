@@ -75,3 +75,18 @@ def test_union_of_channels():
 
     selected = select_representative_pixels(image.reshape(2, 1, 10), quantile=0.9, min_samples=0)
     assert selected.shape[1] == 10
+from picasso.unmixing import compute_optimal_bins
+
+def test_compute_optimal_bins():
+    # Should constrain correctly to clean divisors
+    # 100_000 samples -> target = sqrt(10k) = 100 -> valid = 64
+    assert compute_optimal_bins(100_000) == 64
+
+    # 1_000_000 samples -> target = sqrt(100k) ~ 316 -> valid = 256
+    assert compute_optimal_bins(1_000_000) == 256
+
+    # 1_000 samples -> target = sqrt(100) = 10 -> valid = 8
+    assert compute_optimal_bins(1_000) == 8
+
+    # < 80 samples -> target < sqrt(8) < 3 -> returns 8 fallback
+    assert compute_optimal_bins(50) == 8
