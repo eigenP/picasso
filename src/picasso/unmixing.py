@@ -5,7 +5,7 @@ from typing import Union, Sequence
 import numpy as np
 import numpy.typing as npt
 from fast_histogram import histogram2d, histogram1d
-from scipy.optimize import fmin_cobyla
+from scipy.optimize import fmin_cobyla, minimize_scalar
 from skimage.util import img_as_float
 from tqdm import tqdm
 
@@ -251,32 +251,55 @@ def minimize_mi(
     bins=100,
     upper_bound: Union[float, None] = None,
 ) -> float:
-    def func(alpha: npt.NDArray):
-        return mutual_information(x, y - alpha * x, bins=bins)
+    """
+    Minimizes the mutual information I(X; Y - alpha * X) with respect to alpha.
+
+    Mathematical Justification:
+    I(X; Y - alpha * X) = H(Y - alpha * X) - H(Y - alpha * X | X)
+    Since H(Y - alpha * X | X) = H(Y | X) which is constant with respect to alpha,
+    minimizing Mutual Information is exactly equivalent to minimizing the
+    marginal differential entropy H(Y - alpha * X).
+
+    This reduces the problem from a 2D histogram estimation to a 1D histogram
+    estimation, making it significantly faster and statistically more robust
+    (less variance in the estimator).
+    """
+
+    def objective(alpha: float) -> float:
+        z = y - alpha * x
+        z_min, z_max = z.min(), z.max()
+
+        if z_max == z_min:
+            # Degenerate point mass distribution, minimum possible entropy
+            return -np.inf
+
+        # Calculate differential entropy: H(Z) = H_discrete(Z) + log2(bin_width)
+        dz = (z_max - z_min) / bins
+        c_z = histogram1d(z, bins, (z_min, z_max))
+        return shannon_entropy(c_z) + np.log2(dz)
 
     # Constraints for COBYLA
     # COBYLA expects constraints of the form c(x) >= 0
     # constraint 1: alpha >= 0  => a
-    cons = [lambda a: a]
+    cons = [lambda a: a[0]]
 
     if upper_bound is not None:
         # constraint 2: upper_bound - alpha >= 0
-        cons.append(lambda a, ub=upper_bound: ub - a)
+        cons.append(lambda a, ub=upper_bound: ub - a[0])
 
     # Heuristic: set initial step size (rhobeg) based on bin width relative to range.
-    # Assuming range is roughly constant and x is significant, a change in alpha
-    # needs to shift values by at least one bin width to change the histogram counts.
-    # bin_width ~ Range / bins.
-    # delta_y = delta_alpha * x. We need delta_y ~ bin_width.
-    # So delta_alpha ~ Range / (bins * x).
-    # Assuming Range/x is roughly order of 1, rhobeg should scale with 1/bins.
-    # For 100 bins, 1/100 = 0.01, which matches the original default.
+    # We use rhobeg = 1.0 / bins so that the initial step spans one bin width.
     rhobeg = 1.0 / bins
 
     # Ensure init_alpha is within bounds if bounds are tight
     if upper_bound is not None and init_alpha > upper_bound:
         init_alpha = upper_bound
 
+    def func(alpha: npt.NDArray) -> float:
+        return objective(alpha[0])
+
+    # COBYLA handles the piecewise constant (step) function created by discrete
+    # histograms much more gracefully than Brent's method, achieving high precision.
     result: npt.NDArray = fmin_cobyla(
         func=func,
         x0=np.array([init_alpha]),
@@ -284,7 +307,11 @@ def minimize_mi(
         rhobeg=rhobeg,
         rhoend=1e-8,
     )
-    return result.item()
+
+    val = result.item()
+    if val < 0.0:
+        return 0.0
+    return val
 
 
 def compute_unmixing_matrix(
