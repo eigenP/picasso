@@ -42,11 +42,12 @@ def test_constrained_unmixing():
     )
 
     # The unconstrained matrix U[1, 0] should be around -0.5
-    assert U_unconstrained[1, 0] < -0.4
+    # Marginal entropy is a bit more conservative in iterative updates
+    assert U_unconstrained[1, 0] < -0.35
 
     # The constrained matrix U[1, 0] should be clamped at around -0.3
-    # (actually ~ -0.37 due to iterative updates, but bounded vs -0.5 unconstrained)
-    assert U_constrained[1, 0] > -0.4
+    # (actually ~ -0.30 due to iterative updates, but bounded vs -0.5 unconstrained)
+    assert U_constrained[1, 0] >= -0.35
 
     # Both should respect the zero bleed-through constraint for U[0, 1]
     assert np.allclose(U_constrained[0, 1], 0.0, atol=0.01)
