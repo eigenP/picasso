@@ -1,7 +1,7 @@
 
 import numpy as np
 import pytest
-from picasso.unmixing import compute_unmixing_matrix, select_representative_pixels
+from picasso.unmixing import compute_unmixing_matrix, select_representative_pixels, minimize_mi
 
 def test_unmixing_small_samples():
     """Test unmixing robustness with very small number of samples."""
@@ -56,3 +56,41 @@ def test_select_representative_pixels_fallback():
     assert np.max(pixels) == 10.0
     # The min value should be 0.1
     assert np.min(pixels) == 0.1
+
+def test_minimize_mi_avoids_noise_fitting():
+    """
+    Testr 🔎: Verify robustness of minimize_mi to finite-sample noise.
+
+    This test validates that when given purely independent noise sources,
+    the optimization does not hallucinate a positive unmixing coefficient.
+    The new implementation uses Brent's method with a threshold based on
+    the Miller-Madow bias `(bins - 1)^2 / (2 * N)` to prevent "fitting the noise floor"
+    of the empirical mutual information estimator.
+    """
+    np.random.seed(42)
+
+    # Use enough pixels to make the bias calculation reliable
+    N = 10_000
+    x = np.random.gamma(2, 2, N)
+    y = np.random.gamma(2, 2, N)
+
+    # With purely independent sources, we expect the unmixing coefficient to be exactly 0.0
+    alpha = minimize_mi(x, y, bins=100)
+
+    assert alpha == 0.0, f"Algorithm hallucinated unmixing coefficient {alpha} on independent noise."
+
+def test_minimize_mi_detects_real_signal():
+    """
+    Testr 🔎: Verify that true crosstalk is still detected properly.
+    """
+    np.random.seed(42)
+
+    N = 10_000
+    x = np.random.gamma(2, 2, N)
+    # y contains 10% crosstalk from x
+    y = np.random.gamma(2, 2, N) + 0.1 * x
+
+    alpha = minimize_mi(x, y, bins=100)
+
+    # We expect a coefficient near 0.1, it shouldn't be clamped to 0
+    assert alpha > 0.05, f"Algorithm failed to detect real crosstalk, returned {alpha}."
