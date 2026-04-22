@@ -73,7 +73,10 @@ def select_representative_pixels(
         return img_as_float(valid_pixels_raw)
 
     # 4. Top Percentile Selection
-    # Select pixels that are in the top percentile for *any* channel
+    # Select pixels that are in the top percentile for *any* channel (Union Mask)
+    # This ensures that when a channel is very bright, we also sample the corresponding
+    # spatially-matched pixels in other channels, even if they are relatively dim,
+    # which is exactly where the bleed-through lives.
     n_valid = valid_pixels.shape[1]
     selected_mask = np.zeros(n_valid, dtype=bool)
 
@@ -81,7 +84,7 @@ def select_representative_pixels(
         channel_data = valid_pixels[c, :]
         # Calculate threshold for this channel
         threshold = np.percentile(channel_data, quantile * 100)
-        selected_mask |= channel_data >= threshold
+        selected_mask |= (channel_data >= threshold)
 
     high_signal_pixels = valid_pixels[:, selected_mask]
     n_high_signal = high_signal_pixels.shape[1]
@@ -262,8 +265,12 @@ def minimize_mi(
 
     # Ensure init_alpha is within bounds if bounds are tight
     if init_alpha < lower_bound:
+        import sys
+        print(f"Warning: init_alpha ({init_alpha}) is below lower_bound ({lower_bound}). Clamping.", file=sys.stdout)
         init_alpha = lower_bound
     if init_alpha > ub:
+        import sys
+        print(f"Warning: init_alpha ({init_alpha}) exceeds upper_bound ({ub}). Clamping.", file=sys.stdout)
         init_alpha = ub
 
     mi_init = func(init_alpha)
@@ -278,7 +285,7 @@ def minimize_mi(
     mi_opt = result.fun
 
     N = x.size
-    # Miller-Madow bias threshold
+    # Calculate actual non-zero bins for precise Miller-Madow bias threshold
     # The heuristic for non-zero bins in empirical MI is roughly proportional to bins.
     # Bias threshold ~ K / (2 * N), where K is the number of non-zero bins.
     threshold = bins / (2 * N)
