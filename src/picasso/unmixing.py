@@ -253,9 +253,35 @@ def minimize_mi(
     init_alpha=0.0,
     bins=100,
     upper_bound: Union[float, None] = None,
+    method: str = "marginal_entropy",
 ) -> float:
+    if method not in ("marginal_entropy", "mutual_information"):
+        raise ValueError(
+            f"Invalid method: {method}. Must be 'marginal_entropy' or 'mutual_information'."
+        )
+
     def func(alpha: float) -> float:
-        return mutual_information(x, y - alpha * x, bins=bins)
+        y_new = y - alpha * x
+        if method == "marginal_entropy":
+            # Compute 1D histogram and its entropy
+            y_range = (y_new.min(), y_new.max())
+            c_y_new = histogram1d(y_new.ravel(), bins=bins, range=y_range)
+
+            # The discrete Shannon entropy is an approximation of differential entropy.
+            # Because the range of y_new changes with alpha, the bin width changes.
+            # To preserve the optimization landscape exact equivalence, we MUST apply
+            # the bin width correction: H_diff(Y) = H_discrete(Y) + log2(bin_width)
+            bin_width = (y_range[1] - y_range[0]) / bins
+
+            # To avoid log(0) in degenerate cases where min == max (flat image)
+            if bin_width <= 0:
+                return float("-inf")
+
+            h_discrete = shannon_entropy(c_y_new)
+            h_differential = h_discrete + math.log2(bin_width)
+            return h_differential
+        else:
+            return mutual_information(x, y_new, bins=bins)
 
     lower_bound = 0.0
     ub = upper_bound if upper_bound is not None else 1.0
@@ -310,6 +336,7 @@ def compute_unmixing_matrix(
     min_samples: int = 1_000,
     quantile: float = 0.95,
     theoretical_mixing_matrix: Union[npt.NDArray, None] = None,
+    method: str = "marginal_entropy",
 ) -> npt.NDArray:
     n_channels = len(images)
 
@@ -397,6 +424,7 @@ def compute_unmixing_matrix(
                     init_alpha=init_alpha,
                     bins=optimal_bins,
                     upper_bound=upper_bound,
+                    method=method,
                 )
                 mat[row, col] = -step_mult * coef
 
