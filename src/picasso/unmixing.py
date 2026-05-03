@@ -5,7 +5,7 @@ from typing import Union, Sequence
 import numpy as np
 import numpy.typing as npt
 from fast_histogram import histogram2d, histogram1d
-from scipy.optimize import fmin_cobyla
+from scipy.optimize import minimize_scalar
 from skimage.util import img_as_float
 from tqdm import tqdm
 
@@ -73,7 +73,10 @@ def select_representative_pixels(
         return img_as_float(valid_pixels_raw)
 
     # 4. Top Percentile Selection
-    # Select pixels that are in the top percentile for *any* channel
+    # Select pixels that are in the top percentile for *any* channel (Union Mask)
+    # This ensures that when a channel is very bright, we also sample the corresponding
+    # spatially-matched pixels in other channels, even if they are relatively dim,
+    # which is exactly where the bleed-through lives.
     n_valid = valid_pixels.shape[1]
     selected_mask = np.zeros(n_valid, dtype=bool)
 
@@ -81,7 +84,7 @@ def select_representative_pixels(
         channel_data = valid_pixels[c, :]
         # Calculate threshold for this channel
         threshold = np.percentile(channel_data, quantile * 100)
-        selected_mask |= channel_data >= threshold
+        selected_mask |= (channel_data >= threshold)
 
     high_signal_pixels = valid_pixels[:, selected_mask]
     n_high_signal = high_signal_pixels.shape[1]
@@ -251,40 +254,48 @@ def minimize_mi(
     bins=100,
     upper_bound: Union[float, None] = None,
 ) -> float:
-    def func(alpha: npt.NDArray):
+    def func(alpha: float) -> float:
         return mutual_information(x, y - alpha * x, bins=bins)
 
-    # Constraints for COBYLA
-    # COBYLA expects constraints of the form c(x) >= 0
-    # constraint 1: alpha >= 0  => a
-    cons = [lambda a: a]
+    lower_bound = 0.0
+    ub = upper_bound if upper_bound is not None else 1.0
 
-    if upper_bound is not None:
-        # constraint 2: upper_bound - alpha >= 0
-        cons.append(lambda a, ub=upper_bound: ub - a)
-
-    # Heuristic: set initial step size (rhobeg) based on bin width relative to range.
-    # Assuming range is roughly constant and x is significant, a change in alpha
-    # needs to shift values by at least one bin width to change the histogram counts.
-    # bin_width ~ Range / bins.
-    # delta_y = delta_alpha * x. We need delta_y ~ bin_width.
-    # So delta_alpha ~ Range / (bins * x).
-    # Assuming Range/x is roughly order of 1, rhobeg should scale with 1/bins.
-    # For 100 bins, 1/100 = 0.01, which matches the original default.
-    rhobeg = 1.0 / bins
+    if ub <= lower_bound:
+        return 0.0
 
     # Ensure init_alpha is within bounds if bounds are tight
-    if upper_bound is not None and init_alpha > upper_bound:
-        init_alpha = upper_bound
+    if init_alpha < lower_bound:
+        import sys
+        print(f"Warning: init_alpha ({init_alpha}) is below lower_bound ({lower_bound}). Clamping.", file=sys.stdout)
+        init_alpha = lower_bound
+    if init_alpha > ub:
+        import sys
+        print(f"Warning: init_alpha ({init_alpha}) exceeds upper_bound ({ub}). Clamping.", file=sys.stdout)
+        init_alpha = ub
 
-    result: npt.NDArray = fmin_cobyla(
-        func=func,
-        x0=np.array([init_alpha]),
-        cons=cons,
-        rhobeg=rhobeg,
-        rhoend=1e-8,
+    mi_init = func(init_alpha)
+
+    result = minimize_scalar(
+        func,
+        bounds=(lower_bound, ub),
+        method='bounded'
     )
-    return result.item()
+
+    alpha_opt = result.x
+    mi_opt = result.fun
+
+    N = x.size
+    # Calculate actual non-zero bins for precise Miller-Madow bias threshold
+    # The heuristic for non-zero bins in empirical MI is roughly proportional to bins.
+    # Bias threshold ~ K / (2 * N), where K is the number of non-zero bins.
+    threshold = bins / (2 * N)
+
+    # If the empirical improvement does not exceed the statistical bias floor,
+    # we mathematically reject it to avoid hallucinating unphysical crosstalk.
+    if (mi_init - mi_opt) < threshold:
+        return init_alpha
+
+    return float(alpha_opt)
 
 
 def compute_unmixing_matrix(
