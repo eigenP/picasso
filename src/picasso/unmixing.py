@@ -265,7 +265,6 @@ def minimize_mi(
         if method == "marginal_entropy":
             # Compute 1D histogram and its entropy
             y_range = (y_new.min(), y_new.max())
-            c_y_new = histogram1d(y_new.ravel(), bins=bins, range=y_range)
 
             # The discrete Shannon entropy is an approximation of differential entropy.
             # Because the range of y_new changes with alpha, the bin width changes.
@@ -273,9 +272,11 @@ def minimize_mi(
             # the bin width correction: H_diff(Y) = H_discrete(Y) + log2(bin_width)
             bin_width = (y_range[1] - y_range[0]) / bins
 
-            # To avoid log(0) in degenerate cases where min == max (flat image)
+            # To avoid log(0) and fast_histogram exception in degenerate cases where min == max (flat image)
             if bin_width <= 0:
                 return float("-inf")
+
+            c_y_new = histogram1d(y_new.ravel(), bins=bins, range=y_range)
 
             h_discrete = shannon_entropy(c_y_new)
             h_differential = h_discrete + math.log2(bin_width)
