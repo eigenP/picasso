@@ -201,8 +201,13 @@ def mutual_information(x: npt.NDArray, y: npt.NDArray, *, bins=100) -> float:
     # TODO: even though fast-histogram is pretty dang fast, consider boost-histogram?
     #  measure perf diff
     c_xy = histogram2d(x, y, bins, (x_range, y_range))
-    c_x = histogram1d(x, bins, x_range)
-    c_y = histogram1d(y, bins, y_range)
+
+    # 1D marginals MUST be derived directly from the joint 2D histogram to ensure the
+    # law of total probability holds exactly. Independent 1D histograms can result in
+    # mismatched bin assignments due to floating-point edge effects, leading to
+    # theoretically impossible negative Mutual Information.
+    c_x = np.sum(c_xy, axis=1)
+    c_y = np.sum(c_xy, axis=0)
 
     h_xy = shannon_entropy(c_xy)
     h_x = shannon_entropy(c_x)
