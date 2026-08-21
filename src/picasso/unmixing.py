@@ -201,8 +201,8 @@ def mutual_information(x: npt.NDArray, y: npt.NDArray, *, bins=100) -> float:
     # TODO: even though fast-histogram is pretty dang fast, consider boost-histogram?
     #  measure perf diff
     c_xy = histogram2d(x, y, bins, (x_range, y_range))
-    c_x = histogram1d(x, bins, x_range)
-    c_y = histogram1d(y, bins, y_range)
+    c_x = c_xy.sum(axis=1)
+    c_y = c_xy.sum(axis=0)
 
     h_xy = shannon_entropy(c_xy)
     h_x = shannon_entropy(c_x)
