@@ -21,6 +21,12 @@ def test_unmixing_invariants():
 
        Mathematically: If $I_{perm} = P \cdot I$, then $U(I_{perm}) = U(I)^T$ for $P = [[0, 1], [1, 0]]$.
 
+    3. **Independent Channel Scale Equivariance**: Independently scaling input channels by a diagonal
+       matrix $S$ results in a predictable conjugate transformation of the unmixing matrix.
+       This ensures the algorithm handles channels with fundamentally different brightnesses predictably.
+
+       Mathematically: If $I_{scaled} = S \cdot I$, then $U(I_{scaled}) = S \cdot U(I) \cdot S^{-1}$
+
     These properties are "hard" invariants—they should hold exactly (within floating point precision)
     regardless of the data distribution, provided the data is valid.
     """
@@ -45,7 +51,7 @@ def test_unmixing_invariants():
     u_base = compute_unmixing_matrix(
         list(mixed),
         verbose=False,
-        max_iters=20, # Sufficient for convergence on this simple case
+        max_iters=100, # Increased max_iters to ensure strict convergence for equivariance
         quantile=0.0, # Use all pixels to avoid stochastic selection noise
         max_samples=n_pixels
     )
@@ -61,7 +67,7 @@ def test_unmixing_invariants():
     u_scaled = compute_unmixing_matrix(
         mixed * scale_factor,
         verbose=False,
-        max_iters=20,
+        max_iters=100,
         quantile=0.0,
         max_samples=n_pixels
     )
@@ -76,14 +82,38 @@ def test_unmixing_invariants():
         err_msg=f"Scale Invariance failed. Scaling by {scale_factor} changed the unmixing matrix."
     )
 
-    # 4. Verify Permutation Equivariance
+    # 4. Verify Independent Channel Scale Equivariance
+    S = np.diag([3.0, 0.5])
+    # reshape to flat, apply S, reshape back
+    mixed_indep_scaled_flat = S @ mixed_flat
+    mixed_indep_scaled = mixed_indep_scaled_flat.reshape(2, n_pixels, 1)
+
+    u_indep_scaled = compute_unmixing_matrix(
+        list(mixed_indep_scaled),
+        verbose=False,
+        max_iters=100,
+        quantile=0.0,
+        max_samples=n_pixels
+    )
+
+    S_inv = np.linalg.inv(S)
+    expected_u_indep_scaled = S @ u_base @ S_inv
+
+    np.testing.assert_allclose(
+        u_indep_scaled,
+        expected_u_indep_scaled,
+        atol=1e-2,
+        err_msg="Independent Channel Scale Equivariance failed. Independent scaling did not result in expected conjugate transformation."
+    )
+
+    # 5. Verify Permutation Equivariance
     # Swap channels 0 and 1
     mixed_perm = mixed[::-1, :, :] # (2, N, 1) -> (2, N, 1) with channels swapped
 
     u_perm = compute_unmixing_matrix(
         list(mixed_perm),
         verbose=False,
-        max_iters=20,
+        max_iters=100,
         quantile=0.0,
         max_samples=n_pixels
     )
