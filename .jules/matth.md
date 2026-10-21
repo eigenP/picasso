@@ -3,3 +3,9 @@
 **Learning:** Optimizing empirical Mutual Information via a 1D line search on piecewise-constant 2D histograms (e.g., using algorithms like COBYLA) is fundamentally unprincipled. It often leads to converging on local noise and hallucinating false unmixing coefficients. Furthermore, any empirical Mutual Information estimate carries a statistical bias known as the Miller-Madow bias, which is approximately $K/(2N)$, where $K$ is the number of non-zero bins and $N$ is the number of samples. Optimizing empirical MI without bias correction results in overfitting the noise floor, causing the algorithm to 'unmix' independent variables unphysically.
 
 **Action:** Replace unprincipled optimizers with Brent's method (`minimize_scalar(method='bounded')`) for robust 1D search, and explicitly apply the Miller-Madow bias threshold. If the theoretical mutual information reduction from the optimized coefficient does not exceed the statistical bias floor ($bins / (2N)$), the mathematical improvement is rejected, and the coefficient defaults to its initial value (`init_alpha`, generally 0.0). This ensures mathematically sound convergence and prevents hallucinating unphysical crosstalk.
+
+## 2025-02-18 - Enforce Law of Total Probability in Mutual Information estimation
+
+**Learning:** When calculating empirical mutual information, 1D marginal distributions must be derived directly from the joint 2D histogram (e.g., via summation over axes) rather than computed independently. Because of floating-point edge effects and out-of-bounds clipping, independent 1D histograms can break the law of total probability, violating the non-negativity mathematical guarantee $I(X; Y) \ge 0$.
+
+**Action:** Always derive `c_x` and `c_y` by summing the joint histogram `c_xy` to enforce $I(X; Y) \ge 0$ unconditionally and preserve mathematical correctness.
